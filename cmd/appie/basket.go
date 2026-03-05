@@ -25,56 +25,13 @@ func (cmd *basketCommand) Execute(args []string) error {
 }
 
 func getActiveBasket(ctx context.Context, client *appie.Client) (*appie.Order, int, error) {
-	order, err := client.GetMyListBasket(ctx)
-	if err == nil {
-		orderID, convErr := strconv.Atoi(order.ID)
-		if convErr == nil {
-			return order, orderID, nil
-		}
-
-		// Fall back to active order summary for numeric order ID extraction.
-		// FetchMyListBasket can return a UUID basket ID for some account states.
-		summary, sErr := client.GetOrder(ctx)
-		if sErr == nil {
-			orderID, sErr = strconv.Atoi(summary.ID)
-			if sErr == nil {
-				if order.TotalPrice == 0 {
-					order.TotalPrice = summary.TotalPrice
-					order.TotalDiscount = summary.TotalDiscount
-				}
-				return order, orderID, nil
-			}
-		}
-		return order, 0, nil
-	}
-	if strings.Contains(err.Error(), "no active basket") || strings.Contains(err.Error(), "Order does not exist") {
-		return nil, 0, fmt.Errorf("no active basket; run 'appie order' and then 'appie order reopen <order-id>'")
-	}
-
-	// Compatibility fallback: if GraphQL basket fails for other reasons, use
-	// the existing REST-based basket retrieval path.
-	summary, err := client.GetOrder(ctx)
+	order, orderID, err := client.GetMyListBasketWithOrderID(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "Order does not exist") {
-			return nil, 0, fmt.Errorf("no active basket; run 'appie order' and then 'appie order reopen <order-id>'")
+		if strings.Contains(err.Error(), "no active basket") {
+			return nil, 0, fmt.Errorf("no basket found")
 		}
-		return nil, 0, fmt.Errorf("failed to get active basket: %w", err)
+		return nil, 0, err
 	}
-
-	orderID, err := strconv.Atoi(summary.ID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("invalid active order id %q: %w", summary.ID, err)
-	}
-
-	// Enrich active basket with detailed product info when available.
-	order, err = client.GetOrderDetails(ctx, orderID)
-	if err != nil {
-		order = summary
-	} else {
-		order.TotalPrice = summary.TotalPrice
-		order.TotalDiscount = summary.TotalDiscount
-	}
-
 	return order, orderID, nil
 }
 
@@ -110,9 +67,6 @@ func (cmd *basketAddCommand) Execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	if orderID <= 0 {
-		return fmt.Errorf("adding to basket requires an active numeric order; run 'appie order' and then 'appie order reopen <order-id>'")
-	}
 
 	productID, err := strconv.Atoi(cmd.Args.Product)
 	if err != nil {
@@ -131,11 +85,15 @@ func (cmd *basketAddCommand) Execute(args []string) error {
 		fmt.Printf("Found: %s\n", products[0].Title)
 	}
 
-	if err := client.AddToOrder(ctx, []appie.OrderItem{{ProductID: productID, Quantity: cmd.Quantity}}); err != nil {
+	if err := client.AddToBasket(ctx, productID, cmd.Quantity); err != nil {
 		return err
 	}
 
-	fmt.Printf("Added %dx %d to basket %d\n", cmd.Quantity, productID, orderID)
+	if orderID > 0 {
+		fmt.Printf("Added %dx %d to basket (order %d)\n", cmd.Quantity, productID, orderID)
+	} else {
+		fmt.Printf("Added %dx %d to basket\n", cmd.Quantity, productID)
+	}
 	return nil
 }
 
@@ -155,14 +113,15 @@ func (cmd *basketRmCommand) Execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	if orderID <= 0 {
-		return fmt.Errorf("removing from basket requires an active numeric order; run 'appie order' and then 'appie order reopen <order-id>'")
-	}
 
-	if err := client.RemoveFromOrder(ctx, cmd.Args.ProductID); err != nil {
+	if err := client.RemoveFromBasket(ctx, cmd.Args.ProductID); err != nil {
 		return err
 	}
-	fmt.Printf("Removed %d from basket %d\n", cmd.Args.ProductID, orderID)
+	if orderID > 0 {
+		fmt.Printf("Removed %d from basket (order %d)\n", cmd.Args.ProductID, orderID)
+	} else {
+		fmt.Printf("Removed %d from basket\n", cmd.Args.ProductID)
+	}
 	return nil
 }
 
@@ -178,24 +137,26 @@ func (cmd *basketClearCommand) Execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	if orderID <= 0 {
-		return fmt.Errorf("clearing basket requires an active numeric order; run 'appie order' and then 'appie order reopen <order-id>'")
-	}
 	if len(order.Items) == 0 {
 		fmt.Println("Basket is already empty")
 		return nil
 	}
 
-	if err := client.ClearOrder(ctx); err != nil {
+	if err := client.ClearBasket(ctx, order.ID); err != nil {
 		return err
 	}
-	fmt.Printf("Cleared basket %d\n", orderID)
+	if orderID > 0 {
+		fmt.Printf("Cleared basket (order %d)\n", orderID)
+	} else {
+		fmt.Println("Cleared basket")
+	}
 	return nil
 }
 
 type basketCheckoutCommand struct {
 	Submit bool   `long:"submit" description:"Submit order after checkout preflight"`
 	State  string `long:"state" default:"SUBMIT" description:"Order state transition used for submit"`
+	Limit  int    `short:"n" long:"limit" default:"20" description:"Max delivery slot lines to show"`
 }
 
 func (cmd *basketCheckoutCommand) Execute(args []string) error {
@@ -208,29 +169,58 @@ func (cmd *basketCheckoutCommand) Execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	if orderID <= 0 {
-		return fmt.Errorf("checkout requires an active numeric order; run 'appie order' and then 'appie order reopen <order-id>'")
-	}
 
-	checkout, err := client.GetCheckoutInfo(ctx, orderID)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Checkout for basket %d\n", orderID)
+	fmt.Printf("Checkout for basket %s\n", order.ID)
 	fmt.Printf("Total:          €%.2f\n", order.TotalPrice)
 	fmt.Printf("Items:          %d\n", len(order.Items))
-	fmt.Printf("Missing bonus:  %d\n", checkout.MissingBonus)
-	fmt.Printf("Non-chosen:     %d\n", checkout.NonChosen)
-	fmt.Printf("Non-deliverables: %d\n", checkout.NonDeliverables)
-	fmt.Printf("Kassa koopjes:  %d\n", checkout.KassaKoopjes)
-	fmt.Printf("Recommended:    %d\n", checkout.RecommendedProducts)
-	fmt.Printf("Samples:        %d\n", checkout.Samples)
+
+	member, err := client.GetMember(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get member profile for delivery slots: %w", err)
+	}
+	slots, err := client.GetOrderDeliverySlots(ctx, member.Address)
+	if err != nil {
+		return fmt.Errorf("failed to get delivery slots: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("Available delivery slots:")
+	shown := 0
+	for _, day := range slots {
+		for _, slot := range day.Slots {
+			if slot.IsFullyBooked {
+				continue
+			}
+			fmt.Printf("  %s  %s-%s  €%.2f  shift=%s\n", day.Date, slot.StartTime, slot.EndTime, slot.Price, slot.ShiftCode)
+			shown++
+			if shown >= cmd.Limit {
+				break
+			}
+		}
+		if shown >= cmd.Limit {
+			break
+		}
+	}
+	if shown == 0 {
+		fmt.Println("  No available slots found")
+	}
+
+	if orderID > 0 {
+		fmt.Printf("\nActive order: %d\n", orderID)
+	} else {
+		fmt.Println("\nNo active order is linked to this basket yet.")
+	}
 
 	if !cmd.Submit {
-		fmt.Println()
-		fmt.Println("Run 'appie basket checkout --submit' to submit this basket.")
+		if orderID <= 0 {
+			fmt.Println("Select a delivery slot in the AH app/web checkout flow to create/link an order.")
+		} else {
+			fmt.Println("Run 'appie basket checkout --submit' to submit this basket.")
+		}
 		return nil
+	}
+	if orderID <= 0 {
+		return fmt.Errorf("cannot submit: no active order linked to this basket")
 	}
 
 	state := strings.TrimSpace(cmd.State)

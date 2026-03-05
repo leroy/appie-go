@@ -123,8 +123,8 @@ appie basket                           # show active basket
 appie basket add <product>             # add product (by ID or search term)
 appie basket rm <product-id>           # remove product
 appie basket clear                     # remove all products
-appie basket checkout                  # checkout preflight info
-appie basket checkout --submit         # attempt final submit
+appie basket checkout                  # show delivery slot options
+appie basket checkout --submit         # submit when basket has linked order
 
 # Shopping lists
 appie list                             # list all shopping lists

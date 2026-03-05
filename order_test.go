@@ -598,3 +598,168 @@ func TestUpdateOrderState(t *testing.T) {
 		t.Errorf("request body = %q, want %q", gotBody, "SUBMIT")
 	}
 }
+
+func TestAddToBasket(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "basketItemsAdd") {
+			t.Fatalf("unexpected query: %s", req.Query)
+		}
+		items, _ := req.Variables["items"].([]any)
+		item, _ := items[0].(map[string]any)
+		if int(item["id"].(float64)) != 4083 {
+			t.Fatalf("id = %v, want 4083", item["id"])
+		}
+		if int(item["quantity"].(float64)) != 2 {
+			t.Fatalf("quantity = %v, want 2", item["quantity"])
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"basketItemsAdd": map[string]any{
+					"status":       "SUCCESS",
+					"errorMessage": nil,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	if err := client.AddToBasket(context.Background(), 4083, 2); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRemoveFromBasket(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "basketItemsDelete") {
+			t.Fatalf("unexpected query: %s", req.Query)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"basketItemsDelete": map[string]any{
+					"status":       "SUCCESS",
+					"errorMessage": nil,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	if err := client.RemoveFromBasket(context.Background(), 4083); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestClearBasket(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "basketDeleteV2") {
+			t.Fatalf("unexpected query: %s", req.Query)
+		}
+		if req.Variables["id"] != "basket-123" {
+			t.Fatalf("id = %v, want basket-123", req.Variables["id"])
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"basketDeleteV2": map[string]any{
+					"status":       "SUCCESS",
+					"errorMessage": nil,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	if err := client.ClearBasket(context.Background(), "basket-123"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetOrderDeliverySlots(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "orderDeliverySlots") {
+			t.Fatalf("unexpected query: %s", req.Query)
+		}
+		addr, _ := req.Variables["address"].(map[string]any)
+		if addr["postalCode"] != "8275AT" {
+			t.Fatalf("postalCode = %v, want 8275AT", addr["postalCode"])
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"orderDeliverySlots": []map[string]any{
+					{
+						"dateFormatted": "2026-03-07",
+						"isFullyBooked": false,
+						"slots": []map[string]any{
+							{
+								"dateFormatted":      "2026-03-07",
+								"startTimeFormatted": "16:00:00",
+								"endTimeFormatted":   "20:00:00",
+								"isFullyBooked":      false,
+								"shiftCode":          "26",
+								"serviceCharge": map[string]any{
+									"price":        map[string]any{"amount": 1.95},
+									"defaultPrice": map[string]any{"amount": 1.95},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	days, err := client.GetOrderDeliverySlots(context.Background(), Address{
+		Street:      "Veecaterweg",
+		HouseNumber: 6,
+		PostalCode:  "8275 AT",
+		City:        "'S-HEERENBROEK",
+		CountryCode: "NLD",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(days) != 1 || len(days[0].Slots) != 1 {
+		t.Fatalf("unexpected slots: %#v", days)
+	}
+	if days[0].Slots[0].ShiftCode != "26" {
+		t.Fatalf("shift = %q, want %q", days[0].Slots[0].ShiftCode, "26")
+	}
+	if math.Abs(days[0].Slots[0].Price-1.95) > 0.0001 {
+		t.Fatalf("price = %.6f, want 1.95", days[0].Slots[0].Price)
+	}
+}

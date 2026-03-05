@@ -301,7 +301,13 @@ const fetchMyListBasketQuery = `query FetchMyListBasket($input: BasketInput, $st
       }
     }
     summary {
+      orderId
       quantity
+      shoppingType
+      deliveryDate
+      deliveryStartTime
+      deliveryEndTime
+      state
       price {
         totalPrice { amount }
         discount { amount }
@@ -313,6 +319,13 @@ const fetchMyListBasketQuery = `query FetchMyListBasket($input: BasketInput, $st
 // GetMyListBasket retrieves the current basket via GraphQL FetchMyListBasket.
 // This query returns product-level details and basket totals in one request.
 func (c *Client) GetMyListBasket(ctx context.Context) (*Order, error) {
+	order, _, err := c.GetMyListBasketWithOrderID(ctx)
+	return order, err
+}
+
+// GetMyListBasketWithOrderID retrieves the current basket and returns both
+// basket data and the linked numeric order ID (if available).
+func (c *Client) GetMyListBasketWithOrderID(ctx context.Context) (*Order, int, error) {
 	type priceV2 struct {
 		Now struct {
 			Amount float64 `json:"amount"`
@@ -344,12 +357,18 @@ func (c *Client) GetMyListBasket(ctx context.Context) (*Order, error) {
 			ItemsInOrder []basketItem `json:"itemsInOrder"`
 			Products     []basketItem `json:"products"`
 			Summary      struct {
-				Quantity int `json:"quantity"`
-				Price    struct {
-					TotalPrice struct {
+				OrderID           int    `json:"orderId"`
+				Quantity          int    `json:"quantity"`
+				ShoppingType      string `json:"shoppingType"`
+				DeliveryDate      string `json:"deliveryDate"`
+				DeliveryStartTime string `json:"deliveryStartTime"`
+				DeliveryEndTime   string `json:"deliveryEndTime"`
+				State             string `json:"state"`
+				Price             struct {
+					TotalPrice *struct {
 						Amount float64 `json:"amount"`
 					} `json:"totalPrice"`
-					Discount struct {
+					Discount *struct {
 						Amount float64 `json:"amount"`
 					} `json:"discount"`
 				} `json:"price"`
@@ -365,11 +384,11 @@ func (c *Client) GetMyListBasket(ctx context.Context) (*Order, error) {
 		},
 	}
 	if err := c.DoGraphQL(ctx, fetchMyListBasketQuery, vars, &resp); err != nil {
-		return nil, fmt.Errorf("get basket failed: %w", err)
+		return nil, 0, fmt.Errorf("get basket failed: %w", err)
 	}
 
 	if resp.Basket == nil || resp.Basket.ID == "" {
-		return nil, fmt.Errorf("no active basket")
+		return nil, 0, fmt.Errorf("no active basket")
 	}
 
 	rawItems := resp.Basket.ItemsInOrder
@@ -406,18 +425,227 @@ func (c *Client) GetMyListBasket(ctx context.Context) (*Order, error) {
 		computedTotal += float64(it.Quantity) * price.Now
 	}
 
-	totalPrice := resp.Basket.Summary.Price.TotalPrice.Amount
+	var totalPrice float64
+	if resp.Basket.Summary.Price.TotalPrice != nil {
+		totalPrice = resp.Basket.Summary.Price.TotalPrice.Amount
+	}
 	if totalPrice == 0 && computedTotal > 0 {
 		totalPrice = computedTotal
+	}
+	var totalDiscount float64
+	if resp.Basket.Summary.Price.Discount != nil {
+		totalDiscount = resp.Basket.Summary.Price.Discount.Amount
+	}
+
+	linkedOrderID := resp.Basket.Summary.OrderID
+	if linkedOrderID > 0 {
+		c.SetOrderID(linkedOrderID)
 	}
 
 	return &Order{
 		ID:            resp.Basket.ID,
+		State:         resp.Basket.Summary.State,
 		Items:         items,
 		TotalCount:    len(items),
 		TotalPrice:    totalPrice,
-		TotalDiscount: resp.Basket.Summary.Price.Discount.Amount,
-	}, nil
+		TotalDiscount: totalDiscount,
+	}, linkedOrderID, nil
+}
+
+const basketItemsAddMutation = `mutation BasketItemsAdd($items: [BasketMutation!]!) {
+  basketItemsAdd(items: $items) {
+    status
+    errorMessage
+  }
+}`
+
+const basketItemsUpdateMutation = `mutation BasketItemsUpdate($items: [BasketMutation!]!) {
+  basketItemsUpdate(items: $items) {
+    status
+    errorMessage
+  }
+}`
+
+const basketItemsDeleteMutation = `mutation BasketItemsDelete($items: [BasketDelete!]!) {
+  basketItemsDelete(items: $items) {
+    status
+    errorMessage
+  }
+}`
+
+const basketDeleteMutation = `mutation BasketDelete($id: String!) {
+  basketDeleteV2(id: $id) {
+    status
+    errorMessage
+  }
+}`
+
+func (c *Client) mutateBasket(ctx context.Context, query string, variables map[string]any, field string) error {
+	var resp map[string]struct {
+		Status       string `json:"status"`
+		ErrorMessage string `json:"errorMessage"`
+	}
+	if err := c.DoGraphQL(ctx, query, variables, &resp); err != nil {
+		return err
+	}
+	result, ok := resp[field]
+	if !ok {
+		return fmt.Errorf("basket mutation %s failed: missing response field", field)
+	}
+	if result.Status != "SUCCESS" {
+		if result.ErrorMessage != "" {
+			return fmt.Errorf("basket mutation %s failed: %s", field, result.ErrorMessage)
+		}
+		return fmt.Errorf("basket mutation %s failed with status %s", field, result.Status)
+	}
+	return nil
+}
+
+// AddToBasket adds quantity for a product to the basket via GraphQL.
+func (c *Client) AddToBasket(ctx context.Context, productID, quantity int) error {
+	if quantity <= 0 {
+		return fmt.Errorf("quantity must be > 0")
+	}
+	variables := map[string]any{
+		"items": []map[string]any{
+			{"id": productID, "quantity": quantity},
+		},
+	}
+	if err := c.mutateBasket(ctx, basketItemsAddMutation, variables, "basketItemsAdd"); err != nil {
+		return fmt.Errorf("add to basket failed: %w", err)
+	}
+	return nil
+}
+
+// UpdateBasketItem sets an absolute quantity for a product in the basket.
+func (c *Client) UpdateBasketItem(ctx context.Context, productID, quantity int) error {
+	if quantity < 0 {
+		return fmt.Errorf("quantity must be >= 0")
+	}
+	variables := map[string]any{
+		"items": []map[string]any{
+			{"id": productID, "quantity": quantity},
+		},
+	}
+	if err := c.mutateBasket(ctx, basketItemsUpdateMutation, variables, "basketItemsUpdate"); err != nil {
+		return fmt.Errorf("update basket item failed: %w", err)
+	}
+	return nil
+}
+
+// RemoveFromBasket removes a product from the basket via GraphQL.
+func (c *Client) RemoveFromBasket(ctx context.Context, productID int) error {
+	variables := map[string]any{
+		"items": []map[string]any{
+			{"id": productID},
+		},
+	}
+	if err := c.mutateBasket(ctx, basketItemsDeleteMutation, variables, "basketItemsDelete"); err != nil {
+		return fmt.Errorf("remove from basket failed: %w", err)
+	}
+	return nil
+}
+
+// ClearBasket removes all basket items by basket ID via GraphQL.
+func (c *Client) ClearBasket(ctx context.Context, basketID string) error {
+	if strings.TrimSpace(basketID) == "" {
+		return fmt.Errorf("basket id cannot be empty")
+	}
+	variables := map[string]any{"id": basketID}
+	if err := c.mutateBasket(ctx, basketDeleteMutation, variables, "basketDeleteV2"); err != nil {
+		return fmt.Errorf("clear basket failed: %w", err)
+	}
+	return nil
+}
+
+const orderDeliverySlotsQuery = `query OrderDeliverySlots($address: MemberAddressInput!) {
+  orderDeliverySlots(address: $address) {
+    dateFormatted
+    isFullyBooked
+    slots {
+      dateFormatted
+      startTimeFormatted
+      endTimeFormatted
+      isFullyBooked
+      shiftCode
+      serviceCharge {
+        price { amount }
+        defaultPrice { amount }
+      }
+    }
+  }
+}`
+
+// GetOrderDeliverySlots returns available delivery slots for a member address.
+func (c *Client) GetOrderDeliverySlots(ctx context.Context, address Address) ([]DeliverySlotDayOption, error) {
+	type slotResp struct {
+		DateFormatted string `json:"dateFormatted"`
+		IsFullyBooked bool   `json:"isFullyBooked"`
+		ShiftCode     string `json:"shiftCode"`
+		ServiceCharge struct {
+			Price *struct {
+				Amount float64 `json:"amount"`
+			} `json:"price"`
+			DefaultPrice *struct {
+				Amount float64 `json:"amount"`
+			} `json:"defaultPrice"`
+		} `json:"serviceCharge"`
+		StartTimeFormatted string `json:"startTimeFormatted"`
+		EndTimeFormatted   string `json:"endTimeFormatted"`
+	}
+	type dayResp struct {
+		DateFormatted string     `json:"dateFormatted"`
+		IsFullyBooked bool       `json:"isFullyBooked"`
+		Slots         []slotResp `json:"slots"`
+	}
+	var resp struct {
+		OrderDeliverySlots []dayResp `json:"orderDeliverySlots"`
+	}
+
+	postalCode := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(address.PostalCode), " ", ""))
+	variables := map[string]any{
+		"address": map[string]any{
+			"street":           address.Street,
+			"houseNumber":      address.HouseNumber,
+			"houseNumberExtra": address.HouseNumberExtra,
+			"postalCode":       postalCode,
+			"city":             address.City,
+			"countryCode":      address.CountryCode,
+		},
+	}
+	if err := c.DoGraphQL(ctx, orderDeliverySlotsQuery, variables, &resp); err != nil {
+		return nil, fmt.Errorf("get order delivery slots failed: %w", err)
+	}
+
+	out := make([]DeliverySlotDayOption, 0, len(resp.OrderDeliverySlots))
+	for _, day := range resp.OrderDeliverySlots {
+		dayOut := DeliverySlotDayOption{
+			Date:          day.DateFormatted,
+			IsFullyBooked: day.IsFullyBooked,
+			Slots:         make([]DeliverySlotOption, 0, len(day.Slots)),
+		}
+		for _, s := range day.Slots {
+			price := 0.0
+			if s.ServiceCharge.Price != nil {
+				price = s.ServiceCharge.Price.Amount
+			}
+			defaultPrice := price
+			if s.ServiceCharge.DefaultPrice != nil {
+				defaultPrice = s.ServiceCharge.DefaultPrice.Amount
+			}
+			dayOut.Slots = append(dayOut.Slots, DeliverySlotOption{
+				Date:          s.DateFormatted,
+				StartTime:     s.StartTimeFormatted,
+				EndTime:       s.EndTimeFormatted,
+				IsFullyBooked: s.IsFullyBooked,
+				ShiftCode:     s.ShiftCode,
+				Price:         price,
+				DefaultPrice:  defaultPrice,
+			})
+		}
+		out = append(out, dayOut)
+	}
+	return out, nil
 }
 
 // GetCheckoutInfo retrieves checkout preflight metadata for an order.

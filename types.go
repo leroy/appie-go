@@ -264,6 +264,24 @@ type DeliverySlot struct {
 	EndTime string `json:"endTime"`
 }
 
+// DeliverySlotOption represents a selectable delivery slot option for checkout.
+type DeliverySlotOption struct {
+	Date          string  `json:"date"`
+	StartTime     string  `json:"startTime"`
+	EndTime       string  `json:"endTime"`
+	IsFullyBooked bool    `json:"isFullyBooked"`
+	ShiftCode     string  `json:"shiftCode"`
+	Price         float64 `json:"price"`
+	DefaultPrice  float64 `json:"defaultPrice"`
+}
+
+// DeliverySlotDayOption groups selectable delivery slots by day.
+type DeliverySlotDayOption struct {
+	Date          string               `json:"date"`
+	IsFullyBooked bool                 `json:"isFullyBooked"`
+	Slots         []DeliverySlotOption `json:"slots"`
+}
+
 // GraphQL request/response types
 
 type graphQLRequest struct {

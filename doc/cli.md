@@ -125,11 +125,11 @@ Add a product to the active basket. `<product>` can be a numeric product ID or a
 
 ```
 $ appie basket add 371880
-Added 1x 371880 to basket 316501042
+Added 1x 371880 to basket
 
 $ appie basket add "halfvolle melk" -n 2
 Found: AH Halfvolle melk
-Added 2x 12345 to basket 316501042
+Added 2x 12345 to basket
 ```
 
 #### `basket rm <product-id>`
@@ -138,7 +138,7 @@ Remove a product from the active basket.
 
 ```
 $ appie basket rm 371880
-Removed 371880 from basket 316501042
+Removed 371880 from basket
 ```
 
 #### `basket clear`
@@ -147,32 +147,33 @@ Remove all products from the active basket.
 
 ```
 $ appie basket clear
-Cleared basket 316501042
+Cleared basket
 ```
 
-#### `basket checkout [--submit] [--state STATE]`
+#### `basket checkout [-n limit] [--submit] [--state STATE]`
 
-Show checkout preflight information (missing bonus, non-deliverables, recommendations, etc.).  
-Use `--submit` to attempt final submission.
+Show checkout overview and delivery slot options for the member address.  
+If an active numeric order is linked, `--submit` can attempt final submission.
 
 ```
+  -n, --limit NUM      Max delivery slot lines to show (default: 20)
   --submit          Submit order after checkout preflight
   --state STATE     Order state transition used for submit (default: SUBMIT)
 ```
 
 ```
 $ appie basket checkout
-Checkout for basket 316501042
-Total:          €60.52
-Items:          24
-Missing bonus:  2
-Non-chosen:     0
-Non-deliverables: 0
-Kassa koopjes:  3
-Recommended:    6
-Samples:        0
+Checkout for basket 17d06b6d-8e6b-4cfb-be56-57c26b388b74
+Total:          €30.33
+Items:          9
 
-Run 'appie basket checkout --submit' to submit this basket.
+Available delivery slots:
+  2026-03-07  16:00:00-20:00:00  €1.95  shift=26
+  2026-03-07  18:00:00-20:00:00  €4.95  shift=2A
+  ...
+
+No active order is linked to this basket yet.
+Select a delivery slot in the AH app/web checkout flow to create/link an order.
 ```
 
 ### `order`
