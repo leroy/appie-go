@@ -264,6 +264,155 @@ func (c *Client) GetOrderSummary(ctx context.Context) (*OrderSummary, error) {
 	}, nil
 }
 
+const fetchMyListBasketQuery = `query FetchMyListBasket($input: BasketInput, $states: [BonusSegmentState!]) {
+  basket(input: $input) {
+    id
+    canChangeDelivery
+    itemsInOrder {
+      originCode
+      quantity
+      allocatedQuantity
+      isClosed
+      product {
+        id
+        title
+        brand
+        salesUnitSize
+        priceV2(states: $states) {
+          now { amount }
+          was { amount }
+          discount { description }
+        }
+      }
+    }
+    products {
+      originCode
+      quantity
+      product {
+        id
+        title
+        brand
+        salesUnitSize
+        priceV2(states: $states) {
+          now { amount }
+          was { amount }
+          discount { description }
+        }
+      }
+    }
+    summary {
+      quantity
+      price {
+        totalPrice { amount }
+        discount { amount }
+      }
+    }
+  }
+}`
+
+// GetMyListBasket retrieves the current basket via GraphQL FetchMyListBasket.
+// This query returns product-level details and basket totals in one request.
+func (c *Client) GetMyListBasket(ctx context.Context) (*Order, error) {
+	type priceV2 struct {
+		Now struct {
+			Amount float64 `json:"amount"`
+		} `json:"now"`
+		Was *struct {
+			Amount float64 `json:"amount"`
+		} `json:"was"`
+		Discount *struct {
+			Description string `json:"description"`
+		} `json:"discount"`
+	}
+	type basketProduct struct {
+		ID            int     `json:"id"`
+		Title         string  `json:"title"`
+		Brand         string  `json:"brand"`
+		SalesUnitSize string  `json:"salesUnitSize"`
+		PriceV2       priceV2 `json:"priceV2"`
+	}
+	type basketItem struct {
+		OriginCode        string        `json:"originCode"`
+		Quantity          int           `json:"quantity"`
+		AllocatedQuantity int           `json:"allocatedQuantity"`
+		IsClosed          bool          `json:"isClosed"`
+		Product           basketProduct `json:"product"`
+	}
+	type basketResponse struct {
+		Basket *struct {
+			ID           string       `json:"id"`
+			ItemsInOrder []basketItem `json:"itemsInOrder"`
+			Products     []basketItem `json:"products"`
+			Summary      struct {
+				Quantity int `json:"quantity"`
+				Price    struct {
+					TotalPrice struct {
+						Amount float64 `json:"amount"`
+					} `json:"totalPrice"`
+					Discount struct {
+						Amount float64 `json:"amount"`
+					} `json:"discount"`
+				} `json:"price"`
+			} `json:"summary"`
+		} `json:"basket"`
+	}
+
+	var resp basketResponse
+	vars := map[string]any{
+		"input": nil,
+		"states": []string{
+			"ACTIVATED", "ASSIGNED", "NONE", "REDEEMABLE",
+		},
+	}
+	if err := c.DoGraphQL(ctx, fetchMyListBasketQuery, vars, &resp); err != nil {
+		return nil, fmt.Errorf("get basket failed: %w", err)
+	}
+
+	if resp.Basket == nil || resp.Basket.ID == "" {
+		return nil, fmt.Errorf("no active basket")
+	}
+
+	rawItems := resp.Basket.ItemsInOrder
+	if len(rawItems) == 0 {
+		rawItems = resp.Basket.Products
+	}
+
+	items := make([]OrderItem, 0, len(rawItems))
+	for _, it := range rawItems {
+		p := it.Product
+		price := Price{Now: p.PriceV2.Now.Amount}
+		if p.PriceV2.Was != nil && p.PriceV2.Was.Amount > 0 {
+			price.Was = p.PriceV2.Was.Amount
+		}
+
+		bonus := ""
+		if p.PriceV2.Discount != nil {
+			bonus = p.PriceV2.Discount.Description
+		}
+
+		items = append(items, OrderItem{
+			ProductID: p.ID,
+			Quantity:  it.Quantity,
+			Product: &Product{
+				ID:             p.ID,
+				Title:          p.Title,
+				Brand:          p.Brand,
+				UnitSize:       p.SalesUnitSize,
+				Price:          price,
+				BonusMechanism: bonus,
+			},
+		})
+	}
+
+	return &Order{
+		ID:            resp.Basket.ID,
+		Items:         items,
+		TotalCount:    len(items),
+		TotalPrice:    resp.Basket.Summary.Price.TotalPrice.Amount,
+		TotalDiscount: resp.Basket.Summary.Price.Discount.Amount,
+	}, nil
+}
+
 // GetCheckoutInfo retrieves checkout preflight metadata for an order.
 // This includes counts for recommendation and validation buckets such as
 // missing bonus products and non-deliverables.

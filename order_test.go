@@ -408,6 +408,111 @@ func TestGetCheckoutInfo(t *testing.T) {
 	}
 }
 
+func TestGetMyListBasket(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("unexpected method: %s", r.Method)
+		}
+
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "FetchMyListBasket") {
+			t.Errorf("unexpected query: %s", req.Query)
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"basket": map[string]any{
+					"id": "316501042",
+					"itemsInOrder": []map[string]any{
+						{
+							"originCode":        "PRD",
+							"quantity":          2,
+							"allocatedQuantity": 2,
+							"isClosed":          false,
+							"product": map[string]any{
+								"id":            199922,
+								"title":         "AH Halfvolle melk",
+								"brand":         "AH",
+								"salesUnitSize": "1 L",
+								"priceV2": map[string]any{
+									"now":      map[string]any{"amount": 1.59},
+									"was":      map[string]any{"amount": 0.0},
+									"discount": nil,
+								},
+							},
+						},
+					},
+					"products": []any{},
+					"summary": map[string]any{
+						"quantity": 2,
+						"price": map[string]any{
+							"totalPrice": map[string]any{"amount": 3.18},
+							"discount":   map[string]any{"amount": 0.0},
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	order, err := client.GetMyListBasket(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if order.ID != "316501042" {
+		t.Errorf("order id = %q, want %q", order.ID, "316501042")
+	}
+	if len(order.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(order.Items))
+	}
+	if order.Items[0].ProductID != 199922 {
+		t.Errorf("product id = %d, want 199922", order.Items[0].ProductID)
+	}
+	if order.Items[0].Quantity != 2 {
+		t.Errorf("quantity = %d, want 2", order.Items[0].Quantity)
+	}
+	if order.Items[0].Product == nil || order.Items[0].Product.Title != "AH Halfvolle melk" {
+		t.Fatalf("unexpected product mapping: %#v", order.Items[0].Product)
+	}
+	if order.TotalPrice != 3.18 {
+		t.Errorf("total price = %.2f, want 3.18", order.TotalPrice)
+	}
+}
+
+func TestGetMyListBasketNoActive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"basket": nil,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	_, err := client.GetMyListBasket(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no active basket") {
+		t.Fatalf("error = %q, want to contain %q", err.Error(), "no active basket")
+	}
+}
+
 func TestUpdateOrderState(t *testing.T) {
 	var gotContentType string
 	var gotBody string

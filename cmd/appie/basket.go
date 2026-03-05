@@ -25,6 +25,30 @@ func (cmd *basketCommand) Execute(args []string) error {
 }
 
 func getActiveBasket(ctx context.Context, client *appie.Client) (*appie.Order, int, error) {
+	order, err := client.GetMyListBasket(ctx)
+	if err == nil {
+		orderID, err := strconv.Atoi(order.ID)
+		if err == nil {
+			return order, orderID, nil
+		}
+
+		// Fall back to active order summary for numeric order ID extraction.
+		summary, sErr := client.GetOrder(ctx)
+		if sErr != nil {
+			return nil, 0, fmt.Errorf("failed to resolve basket order id: %w", sErr)
+		}
+		orderID, sErr = strconv.Atoi(summary.ID)
+		if sErr != nil {
+			return nil, 0, fmt.Errorf("invalid active order id %q: %w", summary.ID, sErr)
+		}
+		return order, orderID, nil
+	}
+	if strings.Contains(err.Error(), "no active basket") || strings.Contains(err.Error(), "Order does not exist") {
+		return nil, 0, fmt.Errorf("no active basket; run 'appie order' and then 'appie order reopen <order-id>'")
+	}
+
+	// Compatibility fallback: if GraphQL basket fails for other reasons, use
+	// the existing REST-based basket retrieval path.
 	summary, err := client.GetOrder(ctx)
 	if err != nil {
 		if strings.Contains(err.Error(), "Order does not exist") {
@@ -39,7 +63,7 @@ func getActiveBasket(ctx context.Context, client *appie.Client) (*appie.Order, i
 	}
 
 	// Enrich active basket with detailed product info when available.
-	order, err := client.GetOrderDetails(ctx, orderID)
+	order, err = client.GetOrderDetails(ctx, orderID)
 	if err != nil {
 		order = summary
 	} else {
