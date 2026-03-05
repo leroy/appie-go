@@ -566,6 +566,7 @@ const orderDeliverySlotsQuery = `query OrderDeliverySlots($address: MemberAddres
       dateFormatted
       startTimeFormatted
       endTimeFormatted
+      deliveryLocationId
       isFullyBooked
       shiftCode
       serviceCharge {
@@ -579,10 +580,11 @@ const orderDeliverySlotsQuery = `query OrderDeliverySlots($address: MemberAddres
 // GetOrderDeliverySlots returns available delivery slots for a member address.
 func (c *Client) GetOrderDeliverySlots(ctx context.Context, address Address) ([]DeliverySlotDayOption, error) {
 	type slotResp struct {
-		DateFormatted string `json:"dateFormatted"`
-		IsFullyBooked bool   `json:"isFullyBooked"`
-		ShiftCode     string `json:"shiftCode"`
-		ServiceCharge struct {
+		DateFormatted      string `json:"dateFormatted"`
+		IsFullyBooked      bool   `json:"isFullyBooked"`
+		ShiftCode          string `json:"shiftCode"`
+		DeliveryLocationID int    `json:"deliveryLocationId"`
+		ServiceCharge      struct {
 			Price *struct {
 				Amount float64 `json:"amount"`
 			} `json:"price"`
@@ -634,18 +636,87 @@ func (c *Client) GetOrderDeliverySlots(ctx context.Context, address Address) ([]
 				defaultPrice = s.ServiceCharge.DefaultPrice.Amount
 			}
 			dayOut.Slots = append(dayOut.Slots, DeliverySlotOption{
-				Date:          s.DateFormatted,
-				StartTime:     s.StartTimeFormatted,
-				EndTime:       s.EndTimeFormatted,
-				IsFullyBooked: s.IsFullyBooked,
-				ShiftCode:     s.ShiftCode,
-				Price:         price,
-				DefaultPrice:  defaultPrice,
+				Date:               s.DateFormatted,
+				StartTime:          s.StartTimeFormatted,
+				EndTime:            s.EndTimeFormatted,
+				IsFullyBooked:      s.IsFullyBooked,
+				DeliveryLocationID: s.DeliveryLocationID,
+				ShiftCode:          s.ShiftCode,
+				Price:              price,
+				DefaultPrice:       defaultPrice,
 			})
 		}
 		out = append(out, dayOut)
 	}
 	return out, nil
+}
+
+const orderCheckinMutation = `mutation Checkin(
+  $slot: OrderSlot
+  $address: OrderDeliveryAddress
+  $orderId: Int
+  $pickupLocationId: Int
+  $ociShopSession: OciShopSession
+  $delivererMessage: String
+) {
+  orderCheckin(
+    slot: $slot
+    address: $address
+    orderId: $orderId
+    pickupLocationId: $pickupLocationId
+    delivererMessage: $delivererMessage
+    ociShopSession: $ociShopSession
+  ) {
+    orderId
+    status
+    errorMessage
+  }
+}`
+
+// CheckinOrderSlot selects a delivery slot and returns/activates the created order ID.
+// This maps to the web checkout "checkin" mutation used after slot selection.
+func (c *Client) CheckinOrderSlot(ctx context.Context, slot DeliverySlotOption, address Address) (int, error) {
+	postalCode := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(address.PostalCode), " ", ""))
+	variables := map[string]any{
+		"slot": map[string]any{
+			"date":               slot.Date,
+			"shiftCode":          slot.ShiftCode,
+			"deliveryLocationId": slot.DeliveryLocationID,
+		},
+		"address": map[string]any{
+			"city":              address.City,
+			"countryCodeAlpha3": address.CountryCode,
+			"houseNumber":       address.HouseNumber,
+			"houseNumberExtra":  address.HouseNumberExtra,
+			"postalCode":        postalCode,
+			"street":            address.Street,
+		},
+		"orderId":          nil,
+		"pickupLocationId": nil,
+		"ociShopSession":   nil,
+		"delivererMessage": nil,
+	}
+
+	var resp struct {
+		OrderCheckin struct {
+			OrderID      int    `json:"orderId"`
+			Status       string `json:"status"`
+			ErrorMessage string `json:"errorMessage"`
+		} `json:"orderCheckin"`
+	}
+	if err := c.DoGraphQL(ctx, orderCheckinMutation, variables, &resp); err != nil {
+		return 0, fmt.Errorf("order checkin failed: %w", err)
+	}
+	if resp.OrderCheckin.Status != "SUCCESS" {
+		if resp.OrderCheckin.ErrorMessage != "" {
+			return 0, fmt.Errorf("order checkin failed: %s", resp.OrderCheckin.ErrorMessage)
+		}
+		return 0, fmt.Errorf("order checkin failed: %s", resp.OrderCheckin.Status)
+	}
+	if resp.OrderCheckin.OrderID > 0 {
+		c.SetOrderID(resp.OrderCheckin.OrderID)
+	}
+	return resp.OrderCheckin.OrderID, nil
 }
 
 // GetCheckoutInfo retrieves checkout preflight metadata for an order.

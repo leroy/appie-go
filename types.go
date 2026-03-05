@@ -266,13 +266,14 @@ type DeliverySlot struct {
 
 // DeliverySlotOption represents a selectable delivery slot option for checkout.
 type DeliverySlotOption struct {
-	Date          string  `json:"date"`
-	StartTime     string  `json:"startTime"`
-	EndTime       string  `json:"endTime"`
-	IsFullyBooked bool    `json:"isFullyBooked"`
-	ShiftCode     string  `json:"shiftCode"`
-	Price         float64 `json:"price"`
-	DefaultPrice  float64 `json:"defaultPrice"`
+	Date               string  `json:"date"`
+	StartTime          string  `json:"startTime"`
+	EndTime            string  `json:"endTime"`
+	IsFullyBooked      bool    `json:"isFullyBooked"`
+	DeliveryLocationID int     `json:"deliveryLocationId"`
+	ShiftCode          string  `json:"shiftCode"`
+	Price              float64 `json:"price"`
+	DefaultPrice       float64 `json:"defaultPrice"`
 }
 
 // DeliverySlotDayOption groups selectable delivery slots by day.

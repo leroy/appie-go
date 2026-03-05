@@ -124,6 +124,7 @@ appie basket add <product>             # add product (by ID or search term)
 appie basket rm <product-id>           # remove product
 appie basket clear                     # remove all products
 appie basket checkout                  # show delivery slot options
+appie basket checkout --select-date YYYY-MM-DD --select-shift CODE  # check in slot / link order
 appie basket checkout --submit         # submit when basket has linked order
 
 # Shopping lists

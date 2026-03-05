@@ -727,6 +727,7 @@ func TestGetOrderDeliverySlots(t *testing.T) {
 								"dateFormatted":      "2026-03-07",
 								"startTimeFormatted": "16:00:00",
 								"endTimeFormatted":   "20:00:00",
+								"deliveryLocationId": 8944,
 								"isFullyBooked":      false,
 								"shiftCode":          "26",
 								"serviceCharge": map[string]any{
@@ -759,7 +760,68 @@ func TestGetOrderDeliverySlots(t *testing.T) {
 	if days[0].Slots[0].ShiftCode != "26" {
 		t.Fatalf("shift = %q, want %q", days[0].Slots[0].ShiftCode, "26")
 	}
+	if days[0].Slots[0].DeliveryLocationID != 8944 {
+		t.Fatalf("delivery location id = %d, want %d", days[0].Slots[0].DeliveryLocationID, 8944)
+	}
 	if math.Abs(days[0].Slots[0].Price-1.95) > 0.0001 {
 		t.Fatalf("price = %.6f, want 1.95", days[0].Slots[0].Price)
+	}
+}
+
+func TestCheckinOrderSlot(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "orderCheckin") {
+			t.Fatalf("unexpected query: %s", req.Query)
+		}
+		slot, _ := req.Variables["slot"].(map[string]any)
+		if slot["date"] != "2026-03-08" {
+			t.Fatalf("slot.date = %v, want 2026-03-08", slot["date"])
+		}
+		if slot["shiftCode"] != "26" {
+			t.Fatalf("slot.shiftCode = %v, want 26", slot["shiftCode"])
+		}
+		if int(slot["deliveryLocationId"].(float64)) != 8944 {
+			t.Fatalf("slot.deliveryLocationId = %v, want 8944", slot["deliveryLocationId"])
+		}
+		addr, _ := req.Variables["address"].(map[string]any)
+		if addr["countryCodeAlpha3"] != "NLD" {
+			t.Fatalf("address.countryCodeAlpha3 = %v, want NLD", addr["countryCodeAlpha3"])
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"orderCheckin": map[string]any{
+					"orderId":      123456,
+					"status":       "SUCCESS",
+					"errorMessage": nil,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	orderID, err := client.CheckinOrderSlot(context.Background(), DeliverySlotOption{
+		Date:               "2026-03-08",
+		ShiftCode:          "26",
+		DeliveryLocationID: 8944,
+	}, Address{
+		Street:      "Veecaterweg",
+		HouseNumber: 6,
+		PostalCode:  "8275 AT",
+		City:        "'S-HEERENBROEK",
+		CountryCode: "NLD",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if orderID != 123456 {
+		t.Fatalf("orderID = %d, want 123456", orderID)
 	}
 }

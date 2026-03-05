@@ -150,13 +150,15 @@ $ appie basket clear
 Cleared basket
 ```
 
-#### `basket checkout [-n limit] [--submit] [--state STATE]`
+#### `basket checkout [-n limit] [--select-date DATE --select-shift CODE] [--submit] [--state STATE]`
 
 Show checkout overview and delivery slot options for the member address.  
 If an active numeric order is linked, `--submit` can attempt final submission.
 
 ```
   -n, --limit NUM      Max delivery slot lines to show (default: 20)
+  --select-date DATE   Select delivery date (YYYY-MM-DD) and create/link order
+  --select-shift CODE  Select shift code from listed slots (requires --select-date)
   --submit          Submit order after checkout preflight
   --state STATE     Order state transition used for submit (default: SUBMIT)
 ```
@@ -168,12 +170,19 @@ Total:          €30.33
 Items:          9
 
 Available delivery slots:
-  2026-03-07  16:00:00-20:00:00  €1.95  shift=26
-  2026-03-07  18:00:00-20:00:00  €4.95  shift=2A
+  2026-03-07  16:00:00-20:00:00  €1.95  shift=26  loc=8944
+  2026-03-07  18:00:00-20:00:00  €4.95  shift=2A  loc=8944
   ...
 
 No active order is linked to this basket yet.
-Select a delivery slot in the AH app/web checkout flow to create/link an order.
+Use --select-date and --select-shift to check in a slot and create/link an order.
+```
+
+```
+$ appie basket checkout --select-date 2026-03-08 --select-shift 26
+Selected slot 2026-03-08 16:00:00-20:00:00 (shift=26)
+
+Active order: 316501042
 ```
 
 ### `order`

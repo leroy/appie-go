@@ -154,9 +154,26 @@ func (cmd *basketClearCommand) Execute(args []string) error {
 }
 
 type basketCheckoutCommand struct {
-	Submit bool   `long:"submit" description:"Submit order after checkout preflight"`
-	State  string `long:"state" default:"SUBMIT" description:"Order state transition used for submit"`
-	Limit  int    `short:"n" long:"limit" default:"20" description:"Max delivery slot lines to show"`
+	Submit      bool   `long:"submit" description:"Submit order after checkout preflight"`
+	State       string `long:"state" default:"SUBMIT" description:"Order state transition used for submit"`
+	Limit       int    `short:"n" long:"limit" default:"20" description:"Max delivery slot lines to show"`
+	SelectDate  string `long:"select-date" description:"Select delivery date (YYYY-MM-DD) and create/link order"`
+	SelectShift string `long:"select-shift" description:"Select shift code from listed slots (requires --select-date)"`
+}
+
+func chooseDeliverySlot(days []appie.DeliverySlotDayOption, date, shiftCode string) (*appie.DeliverySlotOption, error) {
+	for _, day := range days {
+		if day.Date != date {
+			continue
+		}
+		for i := range day.Slots {
+			slot := &day.Slots[i]
+			if slot.ShiftCode == shiftCode {
+				return slot, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("slot not found for date %s and shift %s", date, shiftCode)
 }
 
 func (cmd *basketCheckoutCommand) Execute(args []string) error {
@@ -191,7 +208,7 @@ func (cmd *basketCheckoutCommand) Execute(args []string) error {
 			if slot.IsFullyBooked {
 				continue
 			}
-			fmt.Printf("  %s  %s-%s  €%.2f  shift=%s\n", day.Date, slot.StartTime, slot.EndTime, slot.Price, slot.ShiftCode)
+			fmt.Printf("  %s  %s-%s  €%.2f  shift=%s  loc=%d\n", day.Date, slot.StartTime, slot.EndTime, slot.Price, slot.ShiftCode, slot.DeliveryLocationID)
 			shown++
 			if shown >= cmd.Limit {
 				break
@@ -205,6 +222,26 @@ func (cmd *basketCheckoutCommand) Execute(args []string) error {
 		fmt.Println("  No available slots found")
 	}
 
+	wantsSelect := cmd.SelectDate != "" || cmd.SelectShift != ""
+	if wantsSelect {
+		if cmd.SelectDate == "" || cmd.SelectShift == "" {
+			return fmt.Errorf("slot selection requires both --select-date and --select-shift")
+		}
+		slot, err := chooseDeliverySlot(slots, cmd.SelectDate, cmd.SelectShift)
+		if err != nil {
+			return err
+		}
+		if slot.IsFullyBooked {
+			return fmt.Errorf("selected slot %s %s is fully booked", cmd.SelectDate, cmd.SelectShift)
+		}
+		newOrderID, err := client.CheckinOrderSlot(ctx, *slot, member.Address)
+		if err != nil {
+			return err
+		}
+		orderID = newOrderID
+		fmt.Printf("\nSelected slot %s %s-%s (shift=%s)\n", slot.Date, slot.StartTime, slot.EndTime, slot.ShiftCode)
+	}
+
 	if orderID > 0 {
 		fmt.Printf("\nActive order: %d\n", orderID)
 	} else {
@@ -213,7 +250,7 @@ func (cmd *basketCheckoutCommand) Execute(args []string) error {
 
 	if !cmd.Submit {
 		if orderID <= 0 {
-			fmt.Println("Select a delivery slot in the AH app/web checkout flow to create/link an order.")
+			fmt.Println("Use --select-date and --select-shift to check in a slot and create/link an order.")
 		} else {
 			fmt.Println("Run 'appie basket checkout --submit' to submit this basket.")
 		}
