@@ -513,6 +513,55 @@ func TestGetMyListBasketNoActive(t *testing.T) {
 	}
 }
 
+func TestGetMyListBasketComputesTotalWhenSummaryPriceMissing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"basket": map[string]any{
+					"id":           "17d06b6d-8e6b-4cfb-be56-57c26b388b74",
+					"itemsInOrder": nil,
+					"products": []map[string]any{
+						{
+							"quantity": 3,
+							"product": map[string]any{
+								"id":            54074,
+								"title":         "AH Komkommer",
+								"brand":         "AH",
+								"salesUnitSize": "per stuk",
+								"priceV2": map[string]any{
+									"now":      map[string]any{"amount": 0.99},
+									"was":      map[string]any{"amount": 0.99},
+									"discount": map[string]any{"description": "2 voor 1.49"},
+								},
+							},
+						},
+					},
+					"summary": map[string]any{
+						"quantity": 3,
+						"price":    nil,
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	order, err := client.GetMyListBasket(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if math.Abs(order.TotalPrice-2.97) > 0.0001 {
+		t.Errorf("TotalPrice = %.6f, want 2.97", order.TotalPrice)
+	}
+	if len(order.Items) != 1 || order.Items[0].Product == nil {
+		t.Fatalf("unexpected mapped items: %#v", order.Items)
+	}
+	if order.Items[0].Product.BonusMechanism != "2 voor 1.49" {
+		t.Errorf("BonusMechanism = %q, want %q", order.Items[0].Product.BonusMechanism, "2 voor 1.49")
+	}
+}
+
 func TestUpdateOrderState(t *testing.T) {
 	var gotContentType string
 	var gotBody string

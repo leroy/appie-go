@@ -27,21 +27,25 @@ func (cmd *basketCommand) Execute(args []string) error {
 func getActiveBasket(ctx context.Context, client *appie.Client) (*appie.Order, int, error) {
 	order, err := client.GetMyListBasket(ctx)
 	if err == nil {
-		orderID, err := strconv.Atoi(order.ID)
-		if err == nil {
+		orderID, convErr := strconv.Atoi(order.ID)
+		if convErr == nil {
 			return order, orderID, nil
 		}
 
 		// Fall back to active order summary for numeric order ID extraction.
+		// FetchMyListBasket can return a UUID basket ID for some account states.
 		summary, sErr := client.GetOrder(ctx)
-		if sErr != nil {
-			return nil, 0, fmt.Errorf("failed to resolve basket order id: %w", sErr)
+		if sErr == nil {
+			orderID, sErr = strconv.Atoi(summary.ID)
+			if sErr == nil {
+				if order.TotalPrice == 0 {
+					order.TotalPrice = summary.TotalPrice
+					order.TotalDiscount = summary.TotalDiscount
+				}
+				return order, orderID, nil
+			}
 		}
-		orderID, sErr = strconv.Atoi(summary.ID)
-		if sErr != nil {
-			return nil, 0, fmt.Errorf("invalid active order id %q: %w", summary.ID, sErr)
-		}
-		return order, orderID, nil
+		return order, 0, nil
 	}
 	if strings.Contains(err.Error(), "no active basket") || strings.Contains(err.Error(), "Order does not exist") {
 		return nil, 0, fmt.Errorf("no active basket; run 'appie order' and then 'appie order reopen <order-id>'")
@@ -106,6 +110,9 @@ func (cmd *basketAddCommand) Execute(args []string) error {
 	if err != nil {
 		return err
 	}
+	if orderID <= 0 {
+		return fmt.Errorf("adding to basket requires an active numeric order; run 'appie order' and then 'appie order reopen <order-id>'")
+	}
 
 	productID, err := strconv.Atoi(cmd.Args.Product)
 	if err != nil {
@@ -148,6 +155,9 @@ func (cmd *basketRmCommand) Execute(args []string) error {
 	if err != nil {
 		return err
 	}
+	if orderID <= 0 {
+		return fmt.Errorf("removing from basket requires an active numeric order; run 'appie order' and then 'appie order reopen <order-id>'")
+	}
 
 	if err := client.RemoveFromOrder(ctx, cmd.Args.ProductID); err != nil {
 		return err
@@ -167,6 +177,9 @@ func (cmd *basketClearCommand) Execute(args []string) error {
 	order, orderID, err := getActiveBasket(ctx, client)
 	if err != nil {
 		return err
+	}
+	if orderID <= 0 {
+		return fmt.Errorf("clearing basket requires an active numeric order; run 'appie order' and then 'appie order reopen <order-id>'")
 	}
 	if len(order.Items) == 0 {
 		fmt.Println("Basket is already empty")
@@ -194,6 +207,9 @@ func (cmd *basketCheckoutCommand) Execute(args []string) error {
 	order, orderID, err := getActiveBasket(ctx, client)
 	if err != nil {
 		return err
+	}
+	if orderID <= 0 {
+		return fmt.Errorf("checkout requires an active numeric order; run 'appie order' and then 'appie order reopen <order-id>'")
 	}
 
 	checkout, err := client.GetCheckoutInfo(ctx, orderID)

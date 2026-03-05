@@ -378,6 +378,7 @@ func (c *Client) GetMyListBasket(ctx context.Context) (*Order, error) {
 	}
 
 	items := make([]OrderItem, 0, len(rawItems))
+	var computedTotal float64
 	for _, it := range rawItems {
 		p := it.Product
 		price := Price{Now: p.PriceV2.Now.Amount}
@@ -402,13 +403,19 @@ func (c *Client) GetMyListBasket(ctx context.Context) (*Order, error) {
 				BonusMechanism: bonus,
 			},
 		})
+		computedTotal += float64(it.Quantity) * price.Now
+	}
+
+	totalPrice := resp.Basket.Summary.Price.TotalPrice.Amount
+	if totalPrice == 0 && computedTotal > 0 {
+		totalPrice = computedTotal
 	}
 
 	return &Order{
 		ID:            resp.Basket.ID,
 		Items:         items,
 		TotalCount:    len(items),
-		TotalPrice:    resp.Basket.Summary.Price.TotalPrice.Amount,
+		TotalPrice:    totalPrice,
 		TotalDiscount: resp.Basket.Summary.Price.Discount.Amount,
 	}, nil
 }
