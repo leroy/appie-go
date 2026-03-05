@@ -27,6 +27,9 @@ func (cmd *basketCommand) Execute(args []string) error {
 func getActiveBasket(ctx context.Context, client *appie.Client) (*appie.Order, int, error) {
 	summary, err := client.GetOrder(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "Order does not exist") {
+			return nil, 0, fmt.Errorf("no active basket; run 'appie order' and then 'appie order reopen <order-id>'")
+		}
 		return nil, 0, fmt.Errorf("failed to get active basket: %w", err)
 	}
 

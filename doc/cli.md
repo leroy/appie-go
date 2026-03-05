@@ -202,6 +202,17 @@ Delivery: dinsdag 25 feb  18:00-20:00
                             3 items   7.96
 ```
 
+#### `order reopen <order-id>`
+
+Reopen and activate an order as the current basket.  
+Use this when `appie basket` reports that there is no active basket.
+
+```
+$ appie order reopen 1234567
+Reopened order 1234567 (was SUBMITTED)
+Order 1234567 is now the active basket
+```
+
 #### `order add <order-id> <product> [-n quantity]`
 
 Add a product to an order. `<product>` can be a numeric product ID or a search term. Reopens the order if submitted.

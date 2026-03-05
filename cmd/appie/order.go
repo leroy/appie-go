@@ -12,9 +12,10 @@ import (
 )
 
 type orderCommand struct {
-	Show orderShowCommand `command:"show" description:"Show contents of an order"`
-	Add  orderAddCommand  `command:"add" description:"Add a product to an order"`
-	Rm   orderRmCommand   `command:"rm" description:"Remove a product from an order"`
+	Show   orderShowCommand   `command:"show" description:"Show contents of an order"`
+	Reopen orderReopenCommand `command:"reopen" description:"Reopen and activate an order"`
+	Add    orderAddCommand    `command:"add" description:"Add a product to an order"`
+	Rm     orderRmCommand     `command:"rm" description:"Remove a product from an order"`
 }
 
 func (cmd *orderCommand) Execute(args []string) error {
@@ -141,6 +142,38 @@ type orderShowCommand struct {
 	Args struct {
 		OrderID int `positional-arg-name:"order-id" required:"true"`
 	} `positional-args:"yes"`
+}
+
+// reopen subcommand
+
+type orderReopenCommand struct {
+	Args struct {
+		OrderID int `positional-arg-name:"order-id" required:"true"`
+	} `positional-args:"yes"`
+}
+
+func (cmd *orderReopenCommand) Execute(args []string) error {
+	ctx, client, err := orderSetup()
+	if err != nil {
+		return err
+	}
+
+	fulfillments, err := client.GetFulfillments(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get orders: %w", err)
+	}
+
+	orderID := cmd.Args.OrderID
+	if err := ensureOrderOpen(ctx, client, fulfillments, orderID); err != nil {
+		return err
+	}
+
+	if _, err := client.GetOrder(ctx); err != nil {
+		return fmt.Errorf("order %d activated, but failed to load active basket: %w", orderID, err)
+	}
+
+	fmt.Printf("Order %d is now the active basket\n", orderID)
+	return nil
 }
 
 func (cmd *orderShowCommand) Execute(args []string) error {

@@ -114,6 +114,7 @@ appie receipt show <transaction-id>    # show items, discounts, payment
 # Orders
 appie order                            # list open orders
 appie order show <order-id>            # show order contents
+appie order reopen <order-id>          # activate order as current basket
 appie order add <order-id> <product>   # add product (by ID or search term)
 appie order rm <order-id> <product-id> # remove product
 
