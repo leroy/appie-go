@@ -2,9 +2,12 @@ package appie
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // orderDetailsResponse matches the API response for order details grouped by taxonomy.
@@ -259,6 +262,88 @@ func (c *Client) GetOrderSummary(ctx context.Context) (*OrderSummary, error) {
 		TotalPrice:    result.TotalPrice.PriceTotalPayable,
 		TotalDiscount: result.TotalPrice.PriceDiscount,
 	}, nil
+}
+
+// GetCheckoutInfo retrieves checkout preflight metadata for an order.
+// This includes counts for recommendation and validation buckets such as
+// missing bonus products and non-deliverables.
+func (c *Client) GetCheckoutInfo(ctx context.Context, orderID int) (*CheckoutInfo, error) {
+	path := fmt.Sprintf("/mobile-services/order/v1/%d/checkout", orderID)
+
+	var raw struct {
+		KassaKoopjes        []json.RawMessage `json:"kassaKoopjes"`
+		MissingBonus        []json.RawMessage `json:"missingBonus"`
+		NonChosen           []json.RawMessage `json:"nonChosen"`
+		NonDeliverables     []json.RawMessage `json:"nonDeliverables"`
+		RecommendedProducts []json.RawMessage `json:"recommendedProducts"`
+		Samples             []json.RawMessage `json:"samples"`
+		ShowMakeCompleet    bool              `json:"showMakeCompleet"`
+	}
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, fmt.Errorf("get checkout info failed: %w", err)
+	}
+
+	return &CheckoutInfo{
+		KassaKoopjes:        len(raw.KassaKoopjes),
+		MissingBonus:        len(raw.MissingBonus),
+		NonChosen:           len(raw.NonChosen),
+		NonDeliverables:     len(raw.NonDeliverables),
+		RecommendedProducts: len(raw.RecommendedProducts),
+		Samples:             len(raw.Samples),
+		ShowMakeCompleet:    raw.ShowMakeCompleet,
+	}, nil
+}
+
+// UpdateOrderState updates the server-side state for an order.
+// The API expects a plain-text body (for example: "RESET" or "SUBMIT").
+func (c *Client) UpdateOrderState(ctx context.Context, orderID int, state string) error {
+	state = strings.TrimSpace(strings.ToUpper(state))
+	if state == "" {
+		return fmt.Errorf("state cannot be empty")
+	}
+
+	path := fmt.Sprintf("/mobile-services/order/v1/%d/state?orderBy=DEFAULT", orderID)
+	if err := c.doPlainTextRequest(ctx, http.MethodPut, path, state); err != nil {
+		return fmt.Errorf("update order state failed: %w", err)
+	}
+	return nil
+}
+
+// SubmitOrder attempts to submit the order using the state transition API.
+func (c *Client) SubmitOrder(ctx context.Context, orderID int) error {
+	return c.UpdateOrderState(ctx, orderID, "SUBMIT")
+}
+
+func (c *Client) doPlainTextRequest(ctx context.Context, method, path, body string) error {
+	c.ensureFreshToken(ctx, path)
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	c.setHeaders(req)
+	req.Header.Set("Content-Type", "text/plain")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		var apiErr apiError
+		if json.Unmarshal(respBody, &apiErr) == nil && (apiErr.Code != "" || apiErr.Message != "") {
+			return &apiErr
+		}
+		return fmt.Errorf("API error: %d %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
 }
 
 const reopenOrderMutation = `mutation OrderReopen($id: Int!) {

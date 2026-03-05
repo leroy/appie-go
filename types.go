@@ -149,6 +149,19 @@ type OrderSummary struct {
 	DeliveryCost  float64 `json:"deliveryCost,omitempty"`
 }
 
+// CheckoutInfo contains checkout preflight metadata for an order.
+// The AH checkout endpoint returns multiple recommendation/problem buckets.
+// We expose counts per bucket so CLI users can quickly inspect readiness.
+type CheckoutInfo struct {
+	KassaKoopjes        int  `json:"kassaKoopjes"`
+	MissingBonus        int  `json:"missingBonus"`
+	NonChosen           int  `json:"nonChosen"`
+	NonDeliverables     int  `json:"nonDeliverables"`
+	RecommendedProducts int  `json:"recommendedProducts"`
+	Samples             int  `json:"samples"`
+	ShowMakeCompleet    bool `json:"showMakeCompleet"`
+}
+
 // ShoppingList represents a user's shopping list. Users can have multiple lists.
 type ShoppingList struct {
 	// ID is a UUID identifying the list.

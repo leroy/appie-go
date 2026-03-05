@@ -101,6 +101,80 @@ Date:  2025-02-21T14:30:00
      PIN                             42.50
 ```
 
+### `basket`
+
+Show and manage the active basket (shopping cart).
+
+```
+$ appie basket
+Order 316501042  REOPENED
+
+  199922  AH Halfvolle melk       1 L  2   3.18
+  371880  AH Pindakaas naturel  600 g  1   3.59  25% korting
+                                 ──────
+                           2 items  6.77
+```
+
+#### `basket add <product> [-n quantity]`
+
+Add a product to the active basket. `<product>` can be a numeric product ID or a search term.
+
+```
+  -n, --quantity NUM    Quantity to add (default: 1)
+```
+
+```
+$ appie basket add 371880
+Added 1x 371880 to basket 316501042
+
+$ appie basket add "halfvolle melk" -n 2
+Found: AH Halfvolle melk
+Added 2x 12345 to basket 316501042
+```
+
+#### `basket rm <product-id>`
+
+Remove a product from the active basket.
+
+```
+$ appie basket rm 371880
+Removed 371880 from basket 316501042
+```
+
+#### `basket clear`
+
+Remove all products from the active basket.
+
+```
+$ appie basket clear
+Cleared basket 316501042
+```
+
+#### `basket checkout [--submit] [--state STATE]`
+
+Show checkout preflight information (missing bonus, non-deliverables, recommendations, etc.).  
+Use `--submit` to attempt final submission.
+
+```
+  --submit          Submit order after checkout preflight
+  --state STATE     Order state transition used for submit (default: SUBMIT)
+```
+
+```
+$ appie basket checkout
+Checkout for basket 316501042
+Total:          €60.52
+Items:          24
+Missing bonus:  2
+Non-chosen:     0
+Non-deliverables: 0
+Kassa koopjes:  3
+Recommended:    6
+Samples:        0
+
+Run 'appie basket checkout --submit' to submit this basket.
+```
+
 ### `order`
 
 List all open/scheduled orders (fulfillments).

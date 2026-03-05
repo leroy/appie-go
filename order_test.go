@@ -3,10 +3,12 @@ package appie
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -351,5 +353,94 @@ func TestGetOrderDetailsNotFound(t *testing.T) {
 	_, err := client.GetOrderDetails(ctx, 999999)
 	if err == nil {
 		t.Fatal("expected error for non-existent order")
+	}
+}
+
+func TestGetCheckoutInfo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mobile-services/order/v1/316501042/checkout" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected method: %s", r.Method)
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"kassaKoopjes":        []any{map[string]any{"id": 1}},
+			"missingBonus":        []any{map[string]any{"id": 2}, map[string]any{"id": 3}},
+			"nonChosen":           []any{},
+			"nonDeliverables":     []any{map[string]any{"id": 4}},
+			"recommendedProducts": []any{map[string]any{"id": 5}, map[string]any{"id": 6}, map[string]any{"id": 7}},
+			"samples":             []any{},
+			"showMakeCompleet":    true,
+		})
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	info, err := client.GetCheckoutInfo(context.Background(), 316501042)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if info.KassaKoopjes != 1 {
+		t.Errorf("KassaKoopjes = %d, want 1", info.KassaKoopjes)
+	}
+	if info.MissingBonus != 2 {
+		t.Errorf("MissingBonus = %d, want 2", info.MissingBonus)
+	}
+	if info.NonChosen != 0 {
+		t.Errorf("NonChosen = %d, want 0", info.NonChosen)
+	}
+	if info.NonDeliverables != 1 {
+		t.Errorf("NonDeliverables = %d, want 1", info.NonDeliverables)
+	}
+	if info.RecommendedProducts != 3 {
+		t.Errorf("RecommendedProducts = %d, want 3", info.RecommendedProducts)
+	}
+	if info.Samples != 0 {
+		t.Errorf("Samples = %d, want 0", info.Samples)
+	}
+	if !info.ShowMakeCompleet {
+		t.Error("ShowMakeCompleet = false, want true")
+	}
+}
+
+func TestUpdateOrderState(t *testing.T) {
+	var gotContentType string
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mobile-services/order/v1/123/state" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.RawQuery != "orderBy=DEFAULT" {
+			t.Errorf("unexpected query: %s", r.URL.RawQuery)
+		}
+		if r.Method != http.MethodPut {
+			t.Errorf("unexpected method: %s", r.Method)
+		}
+
+		gotContentType = r.Header.Get("Content-Type")
+		var body []byte
+		body, _ = io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := New(WithBaseURL(srv.URL), WithTokens("test", "test"))
+	if err := client.UpdateOrderState(context.Background(), 123, " submit "); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.HasPrefix(gotContentType, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", gotContentType)
+	}
+	if gotBody != "SUBMIT" {
+		t.Errorf("request body = %q, want %q", gotBody, "SUBMIT")
 	}
 }

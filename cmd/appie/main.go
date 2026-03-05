@@ -10,11 +10,12 @@ import (
 )
 
 var globalOpts struct {
-	Config  string         `short:"c" long:"config" description:"Path to config file"`
-	Verbose bool           `short:"v" long:"verbose" description:"Verbose output"`
+	Config  string              `short:"c" long:"config" description:"Path to config file"`
+	Verbose bool                `short:"v" long:"verbose" description:"Verbose output"`
 	Login   loginCommand        `command:"login" description:"Login to Albert Heijn"`
 	Search  searchCommand       `command:"search" description:"Search for products"`
 	Receipt receiptCommand      `command:"receipt" subcommands-optional:"true" description:"List recent receipts"`
+	Basket  basketCommand       `command:"basket" subcommands-optional:"true" description:"Show and manage active basket"`
 	Order   orderCommand        `command:"order" subcommands-optional:"true" description:"List open orders"`
 	List    shoppingListCommand `command:"list" subcommands-optional:"true" description:"Show shopping lists"`
 }

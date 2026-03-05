@@ -117,6 +117,14 @@ appie order show <order-id>            # show order contents
 appie order add <order-id> <product>   # add product (by ID or search term)
 appie order rm <order-id> <product-id> # remove product
 
+# Basket (active order)
+appie basket                           # show active basket
+appie basket add <product>             # add product (by ID or search term)
+appie basket rm <product-id>           # remove product
+appie basket clear                     # remove all products
+appie basket checkout                  # checkout preflight info
+appie basket checkout --submit         # attempt final submit
+
 # Shopping lists
 appie list                             # list all shopping lists
 appie list show <list-id>              # show items in a list
